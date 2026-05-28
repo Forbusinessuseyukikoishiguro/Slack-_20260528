@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Slack アイコン分割ツール</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root {
+    --bg: #0f0f13;
+    --surface: #18181f;
+    --surface2: #22222c;
+    --border: #2e2e3a;
+    --accent: #7c6cfa;
+    --accent2: #fa6c9a;
+    --text: #f0eff8;
+    --muted: #7a7990;
+    --success: #5de8b0;
+    --card-bg: #1c1c26;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans JP', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* 背景グリッド */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 48px 48px;
+    opacity: 0.3;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrapper {
+    position: relative;
+    z-index: 1;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  /* ヘッダー */
+  header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, rgba(124,108,250,.15), rgba(250,108,154,.15));
+    border: 1px solid rgba(124,108,250,.3);
+    border-radius: 100px;
+    padding: 4px 14px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  h1 {
+    font-size: clamp(28px, 5vw, 44px);
+    font-weight: 700;
+    line-height: 1.15;
+    background: linear-gradient(135deg, #f0eff8 30%, var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 12px;
+  }
+
+  .subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.7;
+  }
+
+  /* ドロップゾーン */
+  .drop-zone {
+    border: 1.5px dashed var(--border);
+    border-radius: 20px;
+    padding: 52px 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .25s ease;
+    background: var(--surface);
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 32px;
+  }
+
+  .drop-zone::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(124,108,250,.08), transparent);
+    pointer-events: none;
+  }
+
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(124,108,250,.05);
+    transform: translateY(-2px);
+  }
+
+  .drop-zone.drag-over {
+    box-shadow: 0 0 0 4px rgba(124,108,250,.15), inset 0 0 40px rgba(124,108,250,.05);
+  }
+
+  .drop-icon {
+    width: 56px;
+    height: 56px;
+    margin: 0 auto 16px;
+    background: linear-gradient(135deg, rgba(124,108,250,.2), rgba(250,108,154,.2));
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+  }
+
+  .drop-title {
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+
+  .drop-sub {
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* グリッド設定 */
+  .config-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px 24px;
+    margin-bottom: 28px;
+    display: none;
+  }
+
+  .config-panel.show { display: block; }
+
+  .config-label {
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  .grid-pills {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+
+  .pill {
+    padding: 6px 16px;
+    border-radius: 100px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-size: 13px;
+    font-family: 'DM Mono', monospace;
+    cursor: pointer;
+    transition: all .15s;
+  }
+
+  .pill:hover { border-color: var(--accent); color: var(--text); }
+
+  .pill.active {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-color: transparent;
+    color: #fff;
+    font-weight: 500;
+  }
+
+  .info-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+  }
+
+  .info-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    flex-shrink: 0;
+  }
+
+  /* プレビュー画像 */
+  .preview-wrap {
+    margin-bottom: 28px;
+    display: none;
+    position: relative;
+  }
+
+  .preview-wrap.show { display: block; }
+
+  .preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .preview-label {
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  #previewImg {
+    width: 100%;
+    max-height: 300px;
+    object-fit: contain;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: #000;
+    display: block;
+  }
+
+  /* オーバーレイグリッド */
+  .preview-container {
+    position: relative;
+    display: inline-block;
+    width: 100%;
+  }
+
+  #gridOverlay {
+    position: absolute;
+    top: 0; left: 0;
+    pointer-events: none;
+  }
+
+  /* アイコングリッド */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .section-title {
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .btn-zip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 20px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border: none;
+    border-radius: 100px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: 'Noto Sans JP', sans-serif;
+    cursor: pointer;
+    transition: all .2s;
+    display: none;
+  }
+
+  .btn-zip:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(124,108,250,.4); }
+  .btn-zip:active { transform: scale(.97); }
+  .btn-zip.visible { display: inline-flex; }
+
+  .icon-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 12px;
+  }
+
+  .icon-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: all .2s;
+    animation: fadeIn .3s ease both;
+  }
+
+  .icon-card:hover {
+    border-color: var(--accent);
+    background: rgba(124,108,250,.07);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(124,108,250,.15);
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px) scale(.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  .icon-card canvas {
+    width: 88px;
+    height: 88px;
+    border-radius: 10px;
+    display: block;
+    background: #111;
+  }
+
+  .icon-num {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .icon-card:hover .icon-num { color: var(--accent); }
+
+  /* ダウンロード成功トースト */
+  .toast {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--surface2);
+    border: 1px solid var(--success);
+    border-radius: 100px;
+    padding: 10px 24px;
+    font-size: 13px;
+    color: var(--success);
+    font-family: 'DM Mono', monospace;
+    opacity: 0;
+    transition: all .3s ease;
+    pointer-events: none;
+    z-index: 999;
+    white-space: nowrap;
+  }
+
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  /* empty state */
+  #iconSection { display: none; }
+  #iconSection.show { display: block; }
+
+  .empty-hint {
+    text-align: center;
+    padding: 40px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+<div class="wrapper">
+
+  <header>
+    <div class="badge">✦ slack icon tool</div>
+    <h1>アイコン分割ツール</h1>
+    <p class="subtitle">ChatGPT で生成したグリッド画像を<br>Slack 絵文字用に1枚ずつ切り出します</p>
+  </header>
+
+  <!-- ドロップゾーン -->
+  <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+    <div class="drop-icon">🖼️</div>
+    <div class="drop-title">画像をドロップ、またはクリックして選択</div>
+    <div class="drop-sub">PNG / JPG 対応　複数枚OK</div>
+    <input type="file" id="fileInput" accept="image/*" multiple style="display:none">
+  </div>
+
+  <!-- グリッド設定 -->
+  <div class="config-panel" id="configPanel">
+    <div class="config-label">グリッドレイアウト</div>
+    <div class="grid-pills" id="gridPills">
+      <button class="pill" data-cols="3" data-rows="3">3 × 3</button>
+      <button class="pill active" data-cols="3" data-rows="2">3 × 2</button>
+      <button class="pill" data-cols="2" data-rows="2">2 × 2</button>
+      <button class="pill" data-cols="4" data-rows="1">4 × 1</button>
+      <button class="pill" data-cols="5" data-rows="1">5 × 1</button>
+      <button class="pill" data-cols="3" data-rows="1">3 × 1</button>
+      <button class="pill" data-cols="2" data-rows="1">2 × 1</button>
+    </div>
+    <div class="info-row" id="infoRow">
+      <div class="info-dot"></div>
+      <span id="infoText">—</span>
+    </div>
+  </div>
+
+  <!-- プレビュー -->
+  <div class="preview-wrap" id="previewWrap">
+    <div class="preview-header">
+      <span class="preview-label">プレビュー</span>
+    </div>
+    <div class="preview-container" id="previewContainer">
+      <img id="previewImg" alt="preview">
+      <canvas id="gridOverlay"></canvas>
+    </div>
+  </div>
+
+  <!-- アイコン一覧 -->
+  <div id="iconSection">
+    <div class="section-header">
+      <span class="section-title" id="iconCount">—</span>
+      <button class="btn-zip" id="btnZip" onclick="downloadZip()">
+        <span>📦</span> ZIP でまとめてDL
+      </button>
+    </div>
+    <div class="icon-grid" id="iconGrid"></div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let currentImg = null;
+let currentFilename = 'icons';
+let cols = 3, rows = 2;
+let canvasList = [];
+
+const dropZone  = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+const configPanel = document.getElementById('configPanel');
+const previewWrap = document.getElementById('previewWrap');
+const previewImg  = document.getElementById('previewImg');
+const gridOverlay = document.getElementById('gridOverlay');
+const iconSection = document.getElementById('iconSection');
+const iconGrid    = document.getElementById('iconGrid');
+const infoText    = document.getElementById('infoText');
+const btnZip      = document.getElementById('btnZip');
+
+// ドラッグ&ドロップ
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  handleFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+// グリッドボタン
+document.getElementById('gridPills').addEventListener('click', e => {
+  const btn = e.target.closest('.pill');
+  if (!btn) return;
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  cols = +btn.dataset.cols;
+  rows = +btn.dataset.rows;
+  if (currentImg) renderAll();
+});
+
+function handleFiles(files) {
+  if (!files.length) return;
+  const file = files[0];
+  currentFilename = file.name.replace(/\.[^.]+$/, '');
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    currentImg = img;
+    previewImg.src = url;
+    configPanel.classList.add('show');
+    previewWrap.classList.add('show');
+    iconSection.classList.add('show');
+    btnZip.classList.add('visible');
+    renderAll();
+  };
+  img.src = url;
+}
+
+function renderAll() {
+  if (!currentImg) return;
+  drawOverlay();
+  renderIcons();
+  updateInfo();
+}
+
+function drawOverlay() {
+  const img = currentImg;
+  const container = document.getElementById('previewContainer');
+  const dispW = previewImg.getBoundingClientRect().width || previewImg.offsetWidth || 600;
+  const dispH = dispW * (img.height / img.width);
+
+  gridOverlay.width  = dispW;
+  gridOverlay.height = dispH;
+  gridOverlay.style.width  = dispW + 'px';
+  gridOverlay.style.height = dispH + 'px';
+
+  const ctx = gridOverlay.getContext('2d');
+  ctx.clearRect(0, 0, dispW, dispH);
+  ctx.strokeStyle = 'rgba(124,108,250,0.7)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]);
+
+  const cw = dispW / cols;
+  const ch = dispH / rows;
+  for (let c = 1; c < cols; c++) {
+    ctx.beginPath();
+    ctx.moveTo(c * cw, 0);
+    ctx.lineTo(c * cw, dispH);
+    ctx.stroke();
+  }
+  for (let r = 1; r < rows; r++) {
+    ctx.beginPath();
+    ctx.moveTo(0, r * ch);
+    ctx.lineTo(dispW, r * ch);
+    ctx.stroke();
+  }
+
+  // 番号ラベル
+  ctx.setLineDash([]);
+  ctx.font = 'bold 13px DM Mono, monospace';
+  ctx.fillStyle = 'rgba(124,108,250,0.9)';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      ctx.fillText(String(r * cols + c + 1), c * cw + 7, r * ch + 6);
+    }
+  }
+}
+
+function renderIcons() {
+  const img = currentImg;
+  const cw = img.width / cols;
+  const ch = img.height / rows;
+  canvasList = [];
+  iconGrid.innerHTML = '';
+
+  let delay = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const idx = r * cols + c + 1;
+      const SIZE = 128;
+      const canvas = document.createElement('canvas');
+      canvas.width = SIZE; canvas.height = SIZE;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, c * cw, r * ch, cw, ch, 0, 0, SIZE, SIZE);
+      canvasList.push({ canvas, name: `${currentFilename}_${idx}.png` });
+
+      const card = document.createElement('div');
+      card.className = 'icon-card';
+      card.style.animationDelay = (delay++ * 30) + 'ms';
+      card.title = `クリックでダウンロード`;
+      card.appendChild(canvas);
+      const num = document.createElement('div');
+      num.className = 'icon-num';
+      num.textContent = `# ${String(idx).padStart(2,'0')}`;
+      card.appendChild(num);
+      card.onclick = () => {
+        downloadCanvas(canvas, `${currentFilename}_${idx}.png`);
+        showToast(`# ${idx} をダウンロードしました`);
+      };
+      iconGrid.appendChild(card);
+    }
+  }
+}
+
+function updateInfo() {
+  const total = cols * rows;
+  const cw = Math.round(currentImg.width / cols);
+  const ch = Math.round(currentImg.height / rows);
+  infoText.textContent = `${currentImg.width}×${currentImg.height}px → ${cols}列 × ${rows}行 = ${total}個 (各 ${cw}×${ch}px → 128×128px に変換)`;
+  document.getElementById('iconCount').textContent = `${total} icons`;
+}
+
+function downloadCanvas(canvas, name) {
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL('image/png');
+  a.download = name;
+  a.click();
+}
+
+async function downloadZip() {
+  if (!canvasList.length) return;
+  btnZip.textContent = '📦 準備中...';
+  btnZip.disabled = true;
+  const zip = new JSZip();
+  for (const { canvas, name } of canvasList) {
+    const b64 = canvas.toDataURL('image/png').split(',')[1];
+    zip.file(name, b64, { base64: true });
+  }
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${currentFilename}_icons.zip`;
+  a.click();
+  btnZip.innerHTML = '<span>📦</span> ZIP でまとめてDL';
+  btnZip.disabled = false;
+  showToast(`${canvasList.length}個のアイコンをダウンロードしました`);
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// プレビュー画像ロード後にオーバーレイを再描画
+previewImg.addEventListener('load', () => {
+  setTimeout(drawOverlay, 50);
+});
+
+window.addEventListener('resize', () => {
+  if (currentImg) drawOverlay();
+});
+</script>
+</body>
+</html>
