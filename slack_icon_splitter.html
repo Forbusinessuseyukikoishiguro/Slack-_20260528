@@ -1,0 +1,152 @@
+
+<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);">Slackアイコン分割ツール — 画像をアップロードしてアイコンを個別にダウンロード</h2>
+
+<style>
+  .upload-zone{border:1.5px dashed var(--color-border-secondary);border-radius:var(--border-radius-lg);padding:2rem;text-align:center;cursor:pointer;transition:background .15s;margin-bottom:1.5rem}
+  .upload-zone:hover{background:var(--color-background-secondary)}
+  .icon-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:12px;margin-bottom:1.5rem}
+  .icon-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:10px;display:flex;flex-direction:column;align-items:center;gap:8px}
+  .icon-card canvas{border-radius:8px;width:90px;height:90px;object-fit:contain;background:#000}
+  .icon-card .label{font-size:12px;color:var(--color-text-secondary);text-align:center;word-break:break-all;max-width:100px}
+  .icon-card button{font-size:11px;padding:4px 10px;width:100%}
+  .tabs{display:flex;gap:8px;margin-bottom:1rem;flex-wrap:wrap}
+  .tab{padding:6px 14px;font-size:13px;border-radius:var(--border-radius-md);cursor:pointer;border:0.5px solid var(--color-border-secondary);background:transparent;color:var(--color-text-secondary)}
+  .tab.active{background:var(--color-background-secondary);color:var(--color-text-primary);font-weight:500}
+  #status{font-size:13px;color:var(--color-text-secondary);margin-bottom:1rem}
+  .dl-all{margin-bottom:1rem}
+  #main{padding:1rem 0}
+  .preset-label{font-size:13px;color:var(--color-text-secondary);margin-bottom:8px}
+</style>
+
+<div id="main">
+  <div class="upload-zone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+    <i class="ti ti-photo-up" style="font-size:32px;color:var(--color-text-secondary)" aria-hidden="true"></i>
+    <p style="margin:8px 0 4px;font-weight:500">画像をここにドロップ</p>
+    <p style="font-size:13px;color:var(--color-text-secondary);margin:0">またはクリックしてファイルを選択（複数可）</p>
+    <input type="file" id="fileInput" accept="image/*" multiple style="display:none">
+  </div>
+
+  <div id="configArea" style="display:none;margin-bottom:1rem">
+    <p class="preset-label">グリッドレイアウトを選択</p>
+    <div class="tabs" id="presetTabs">
+      <button class="tab active" data-cols="3" data-rows="3">3×3（9個）</button>
+      <button class="tab" data-cols="3" data-rows="2">3×2（6個）</button>
+      <button class="tab" data-cols="2" data-rows="2">2×2（4個）</button>
+      <button class="tab" data-cols="4" data-rows="1">4×1（4個）</button>
+      <button class="tab" data-cols="3" data-rows="1">3×1（3個）</button>
+      <button class="tab" data-cols="5" data-rows="1">5×1（5個）</button>
+    </div>
+    <p id="status"></p>
+    <button class="dl-all" id="dlAll" style="display:none"><i class="ti ti-download" aria-hidden="true"></i> 全アイコンをまとめてDL（ZIP）</button>
+  </div>
+
+  <div class="icon-grid" id="iconGrid"></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+let currentImg = null;
+let currentFile = null;
+let cols = 3, rows = 3;
+
+const fileInput = document.getElementById('fileInput');
+const dropzone = document.getElementById('dropzone');
+const iconGrid = document.getElementById('iconGrid');
+const status = document.getElementById('status');
+const configArea = document.getElementById('configArea');
+const dlAll = document.getElementById('dlAll');
+
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.style.background='var(--color-background-secondary)'; });
+dropzone.addEventListener('dragleave', () => { dropzone.style.background=''; });
+dropzone.addEventListener('drop', e => { e.preventDefault(); dropzone.style.background=''; handleFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+document.getElementById('presetTabs').addEventListener('click', e => {
+  const btn = e.target.closest('.tab');
+  if (!btn) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  cols = parseInt(btn.dataset.cols);
+  rows = parseInt(btn.dataset.rows);
+  if (currentImg) renderIcons(currentImg, currentFile.name);
+});
+
+function handleFiles(files) {
+  if (!files.length) return;
+  const file = files[0];
+  currentFile = file;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    currentImg = img;
+    configArea.style.display = '';
+    renderIcons(img, file.name);
+  };
+  img.src = url;
+}
+
+function renderIcons(img, filename) {
+  iconGrid.innerHTML = '';
+  const basename = filename.replace(/\.[^.]+$/, '');
+  const cellW = Math.floor(img.width / cols);
+  const cellH = Math.floor(img.height / rows);
+  const total = cols * rows;
+  status.textContent = `${img.width}×${img.height}px → ${cols}列×${rows}行 = ${total}個のアイコン（各 ${cellW}×${cellH}px）`;
+  dlAll.style.display = '';
+
+  const canvases = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const idx = r * cols + c + 1;
+      const card = document.createElement('div');
+      card.className = 'icon-card';
+
+      const canvas = document.createElement('canvas');
+      const size = 128;
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, c * cellW, r * cellH, cellW, cellH, 0, 0, size, size);
+      canvases.push({ canvas, name: `${basename}_${idx}.png` });
+
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = `アイコン ${idx}`;
+
+      const btn = document.createElement('button');
+      btn.innerHTML = '<i class="ti ti-download" aria-hidden="true"></i> DL';
+      btn.onclick = () => downloadCanvas(canvas, `${basename}_${idx}.png`);
+
+      card.appendChild(canvas);
+      card.appendChild(label);
+      card.appendChild(btn);
+      iconGrid.appendChild(card);
+    }
+  }
+
+  dlAll.onclick = async () => {
+    dlAll.disabled = true;
+    dlAll.textContent = '準備中...';
+    const zip = new JSZip();
+    for (const { canvas, name } of canvases) {
+      const dataUrl = canvas.toDataURL('image/png');
+      const base64 = dataUrl.split(',')[1];
+      zip.file(name, base64, { base64: true });
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${basename}_icons.zip`;
+    a.click();
+    dlAll.disabled = false;
+    dlAll.innerHTML = '<i class="ti ti-download"></i> 全アイコンをまとめてDL（ZIP）';
+  };
+}
+
+function downloadCanvas(canvas, name) {
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL('image/png');
+  a.download = name;
+  a.click();
+}
+</script>
